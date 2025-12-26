@@ -996,26 +996,35 @@
         }
         
         async function scanFolder(folderPath) {
-            const files = [];
-            const queue = [folderPath];
-            
-            while (queue.length > 0) {
-                const currentPath = queue.shift();
-                const items = await window.electronAPI.readDir(currentPath);
+            return new Promise((resolve, reject) => {
+                // Listen for progress updates
+                const progressHandler = (e) => {
+                    const { progress, processed, total, currentFile } = e.detail;
+                    updateLoading(progress * 0.8, `Сканирование: ${currentFile}`, processed, total);
+                };
                 
-                for (const item of items) {
-                    const fullPath = path.join(currentPath, item.name);
-                    const stats = await window.electronAPI.statFile(fullPath);
-                    
-                    if (stats.isDirectory) {
-                        queue.push(fullPath);
-                    } else if (stats.isFile && isLoadableFile(item.name)) {
-                        files.push({ path: fullPath, file: null }); // file is null for Electron since we read directly from fs
-                    }
-                }
-            }
-            
-            return files;
+                window.addEventListener('scan-progress', progressHandler);
+                
+                // Call the async scan function
+                window.electronAPI.scanFolderAsync(folderPath)
+                    .then(files => {
+                        // Remove the progress listener
+                        window.removeEventListener('scan-progress', progressHandler);
+                        // Return in the expected format
+                        const formattedFiles = files.map(file => ({ 
+                            path: file.path, 
+                            file: null,
+                            size: file.size,
+                            mtime: file.mtime
+                        }));
+                        resolve(formattedFiles);
+                    })
+                    .catch(error => {
+                        // Remove the progress listener
+                        window.removeEventListener('scan-progress', progressHandler);
+                        reject(error);
+                    });
+            });
         }
         
         // Helper function to join paths (compatible with both Electron and browser)
@@ -1535,17 +1544,40 @@
             const debouncedHighlight = debounce(updateSyntaxHighlight, 50);
             const debouncedStructure = debounce(updateFileStructure, 300);
             
+            // Use a more efficient approach for large files
+            let isUpdating = false;
+            
             DOM.codeEditor.addEventListener('input', () => {
+                if (isUpdating) return; // Prevent re-entrancy
+                
                 if (state.currentFile) {
                     const fileData = state.files.get(state.currentFile);
                     fileData.content = DOM.codeEditor.value;
                     fileData.modified = fileData.content !== fileData.original;
                     renderFileTree();
                 }
-                syncEditorGeometry();
-                updateLineNumbers();
-                debouncedHighlight();
-                debouncedStructure();
+                
+                // Optimize for large files
+                const isLargeFile = DOM.codeEditor.value.length > 100000; // 100KB threshold
+                if (isLargeFile) {
+                    // For large files, update less frequently
+                    if (!isUpdating) {
+                        isUpdating = true;
+                        requestAnimationFrame(() => {
+                            syncEditorGeometry();
+                            updateLineNumbers();
+                            debouncedHighlight();
+                            debouncedStructure();
+                            isUpdating = false;
+                        });
+                    }
+                } else {
+                    // For smaller files, update immediately
+                    syncEditorGeometry();
+                    updateLineNumbers();
+                    debouncedHighlight();
+                    debouncedStructure();
+                }
             });
 
             const throttledScroll = throttle(() => {
@@ -1567,8 +1599,46 @@
                 }
             });
             
+            // Improved selection handling to prevent conflicts with drag operations
+            let isMouseDown = false;
+            let isDragging = false;
+            let dragStartX = 0;
+            let dragStartY = 0;
+            
+            DOM.codeEditor.addEventListener('mousedown', (e) => {
+                isMouseDown = true;
+                isDragging = false;
+                dragStartX = e.clientX;
+                dragStartY = e.clientY;
+                
+                // Allow normal selection behavior
+                updateCursorPosition();
+            });
+            
+            DOM.codeEditor.addEventListener('mousemove', (e) => {
+                if (isMouseDown) {
+                    const deltaX = Math.abs(e.clientX - dragStartX);
+                    const deltaY = Math.abs(e.clientY - dragStartY);
+                    if (deltaX > 5 || deltaY > 5) {
+                        isDragging = true;
+                    }
+                }
+            });
+            
+            DOM.codeEditor.addEventListener('mouseup', (e) => {
+                if (isMouseDown && !isDragging) {
+                    // Single click - update cursor position
+                    updateCursorPosition();
+                }
+                isMouseDown = false;
+                isDragging = false;
+            });
+            
             DOM.codeEditor.addEventListener('click', updateCursorPosition);
             DOM.codeEditor.addEventListener('keyup', throttle(updateCursorPosition, 50));
+            
+            // Handle selection changes separately to avoid conflicts
+            DOM.codeEditor.addEventListener('select', throttle(updateCursorPosition, 50));
         }
         
         function syncEditorGeometry() {
@@ -1588,44 +1658,6 @@
             DOM.codeEditor.style.width = width + 'px';
         }
 
-        function updateSyntaxHighlight() {
-            const code = DOM.codeEditor.value;
-            DOM.codeHighlight.innerHTML = highlightSmali(code);
-        }
-        
-        function highlightSmali(code) {
-            let html = code
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;');
-
-            const comments = [];
-            html = html.replace(/(#.*)$/gm, (m) => {
-                comments.push(m);
-                return `__COMMENT${comments.length-1}__`;
-            });
-            
-            const strings = [];
-            html = html.replace(/("(?:[^"\\]|\\.)*")/g, (m) => {
-                strings.push(m);
-                return `__STRING${strings.length-1}__`;
-            });
-
-            html = html.replace(/(\.(class|super|source|method|end\s+method|locals|registers|line|param|prologue|field|implements|annotation|end\s+annotation))\b/g, '<span class="smali-directive">$1</span>');
-            html = html.replace(/\b(public|private|protected|static|final|abstract|synthetic|constructor|bridge|varargs|declared-synchronized)\b/g, '<span class="smali-modifier">$1</span>');
-            html = html.replace(/\b(invoke-[\w\/-]+)\b/g, '<span class="smali-invoke">$1</span>');
-            html = html.replace(/\b(if-\w+|goto[\w\/]*)\b/g, '<span class="smali-condition">$1</span>');
-            html = html.replace(/\b(move[\w\/-]*|const[\w\/-]*|return[\w-]*|new-instance|new-array|check-cast|instance-of|array-length|fill-array|throw|monitor-[\w]+|[isal]get[\w-]*|[isal]put[\w-]*|add-\w+|sub-\w+|mul-\w+|div-\w+|rem-\w+|and-\w+|or-\w+|xor-\w+|shl-\w+|shr-\w+|ushr-\w+|neg-\w+|not-\w+|cmp[\w-]*|int-to-\w+|long-to-\w+|float-to-\w+|double-to-\w+)\b/g, '<span class="smali-instruction">$1</span>');
-            html = html.replace(/\b(v\d+|p\d+)\b/g, '<span class="smali-register">$1</span>');
-            html = html.replace(/(L[\w\/$]+;)/g, '<span class="smali-type">$1</span>');
-            html = html.replace(/(:\w+)/g, '<span class="smali-label">$1</span>');
-            html = html.replace(/\b(0x[\da-fA-F]+|-?\d+)\b/g, '<span class="smali-number">$1</span>');
-            
-            html = html.replace(/__STRING(\d+)__/g, (_, i) => `<span class="smali-string">${strings[i]}</span>`);
-            html = html.replace(/__COMMENT(\d+)__/g, (_, i) => `<span class="smali-comment">${comments[i]}</span>`);
-
-            return html;
-        }
 
         // ==================== STUB LOGIC ====================
         
@@ -2540,9 +2572,23 @@
         function updateLineNumbers() {
             const lines = DOM.codeEditor.value.split('\n').length;
             if (lines !== state.lastLineCount) {
-                const parts = [];
-                for (let i = 1; i <= lines; i++) parts.push(`<div>${i}</div>`);
-                DOM.lineNumbers.innerHTML = parts.join('');
+                // For large files, use document fragment for better performance
+                const isLargeFile = lines > 1000;
+                if (isLargeFile) {
+                    const fragment = document.createDocumentFragment();
+                    for (let i = 1; i <= lines; i++) {
+                        const div = document.createElement('div');
+                        div.textContent = i;
+                        fragment.appendChild(div);
+                    }
+                    DOM.lineNumbers.innerHTML = '';
+                    DOM.lineNumbers.appendChild(fragment);
+                } else {
+                    // For smaller files, use the simple approach
+                    const parts = [];
+                    for (let i = 1; i <= lines; i++) parts.push(`<div>${i}</div>`);
+                    DOM.lineNumbers.innerHTML = parts.join('');
+                }
                 state.lastLineCount = lines;
             }
             DOM.fileSize.textContent = DOM.codeEditor.value.length + ' байт';
