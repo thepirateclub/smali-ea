@@ -623,6 +623,9 @@
     </div>
 
     <script>
+        // Check if we're in Electron environment
+        const isElectron = window.electronAPI ? true : false;
+        
         // ==================== CONSTANTS ====================
         const LINE_HEIGHT = 22;
         
@@ -796,12 +799,47 @@
         // ==================== DRAG & DROP ====================
         function initDragDrop() {
             // Click to open file dialog
-            DOM.dropZone.addEventListener('click', () => {
-                DOM.fileInput.click();
+            DOM.dropZone.addEventListener('click', async () => {
+                // If we're in Electron, use the file system dialog instead of file input
+                if (isElectron) {
+                    showLoadingOverlay('Сканирование', 'Выбор папки проекта...');
+                    
+                    try {
+                        const folderPaths = await window.electronAPI.showOpenDialog();
+                        
+                        if (!folderPaths || folderPaths.length === 0) {
+                            hideLoadingOverlay();
+                            return; // User cancelled
+                        }
+                        
+                        // Process the selected folder
+                        const files = await scanFolder(folderPaths[0]);
+                        if (files.length === 0) {
+                            hideLoadingOverlay();
+                            showToast('Нет поддерживаемых файлов', 'error');
+                            return;
+                        }
+                        
+                        await processFiles(files);
+                    } catch (error) {
+                        hideLoadingOverlay();
+                        console.error('Error selecting folder:', error);
+                        showToast('Ошибка при выборе папки', 'error');
+                    }
+                } else {
+                    // Browser environment - use file input
+                    DOM.fileInput.click();
+                }
             });
             
-            // Handle file input change
+            // Handle file input change (only for browser environment)
             DOM.fileInput.addEventListener('change', async (e) => {
+                // Skip this in Electron environment since we're using the dialog
+                if (isElectron) {
+                    DOM.fileInput.value = ''; // Clear the input
+                    return;
+                }
+                
                 const files = Array.from(e.target.files);
                 
                 if (files.length === 0) {
@@ -833,13 +871,25 @@
             });
             
             ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(event => {
-                DOM.dropZone.addEventListener(event, e => { e.preventDefault(); e.stopPropagation(); });
+                DOM.dropZone.addEventListener(event, e => { 
+                    e.preventDefault(); 
+                    e.stopPropagation(); 
+                    
+                    // In Electron, we disable drag & drop in favor of the dialog
+                    if (isElectron && event === 'drop') {
+                        // Show message that drag & drop is not supported in Electron
+                        showToast('В Electron используйте кнопку выбора папки', 'info');
+                    }
+                });
                 document.body.addEventListener(event, e => { e.preventDefault(); e.stopPropagation(); });
             });
 
             ['dragenter', 'dragover'].forEach(event => {
                 DOM.dropZone.addEventListener(event, () => {
-                    DOM.dropZone.classList.add('dragover');
+                    // In Electron, don't show dragover effect since we're using dialog
+                    if (!isElectron) {
+                        DOM.dropZone.classList.add('dragover');
+                    }
                 });
             });
 
@@ -866,34 +916,64 @@
         async function handleDrop(e) {
             e.preventDefault();
             DOM.dropZone.classList.remove('dragover');
-            showLoadingOverlay('Сканирование', 'Анализ структуры папок...');
             
-            await nextFrame();
+            // If we're in Electron, use the file system dialog instead of drag & drop
+            if (isElectron) {
+                showLoadingOverlay('Сканирование', 'Выбор папки проекта...');
+                
+                try {
+                    const folderPaths = await window.electronAPI.showOpenDialog();
+                    
+                    if (!folderPaths || folderPaths.length === 0) {
+                        hideLoadingOverlay();
+                        return; // User cancelled
+                    }
+                    
+                    // Process the selected folder
+                    const files = await scanFolder(folderPaths[0]);
+                    if (files.length === 0) {
+                        hideLoadingOverlay();
+                        showToast('Нет поддерживаемых файлов', 'error');
+                        return;
+                    }
+                    
+                    await processFiles(files);
+                } catch (error) {
+                    hideLoadingOverlay();
+                    console.error('Error selecting folder:', error);
+                    showToast('Ошибка при выборе папки', 'error');
+                }
+            } else {
+                // Browser environment - use drag & drop
+                showLoadingOverlay('Сканирование', 'Анализ структуры папок...');
+                
+                await nextFrame();
 
-            const items = e.dataTransfer.items;
-            const files = [];
-            
-            for (const item of items) {
-                if (item.kind === 'file') {
-                    const entry = item.webkitGetAsEntry?.();
-                    if (entry) {
-                        await traverseFileTree(entry, '', files);
-                    } else {
-                        const file = item.getAsFile();
-                        if (isLoadableFile(file.name)) {
-                            files.push({ path: file.name, file });
+                const items = e.dataTransfer.items;
+                const files = [];
+                
+                for (const item of items) {
+                    if (item.kind === 'file') {
+                        const entry = item.webkitGetAsEntry?.();
+                        if (entry) {
+                            await traverseFileTree(entry, '', files);
+                        } else {
+                            const file = item.getAsFile();
+                            if (isLoadableFile(file.name)) {
+                                files.push({ path: file.name, file });
+                            }
                         }
                     }
                 }
-            }
 
-            if (files.length === 0) {
-                hideLoadingOverlay();
-                showToast('Нет поддерживаемых файлов', 'error');
-                return;
+                if (files.length === 0) {
+                    hideLoadingOverlay();
+                    showToast('Нет поддерживаемых файлов', 'error');
+                    return;
+                }
+                
+                await processFiles(files);
             }
-            
-            await processFiles(files);
         }
 
         async function traverseFileTree(entry, path, files) {
@@ -914,6 +994,50 @@
         function nextFrame() {
             return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
         }
+        
+        async function scanFolder(folderPath) {
+            const files = [];
+            const queue = [folderPath];
+            
+            while (queue.length > 0) {
+                const currentPath = queue.shift();
+                const items = await window.electronAPI.readDir(currentPath);
+                
+                for (const item of items) {
+                    const fullPath = path.join(currentPath, item.name);
+                    const stats = await window.electronAPI.statFile(fullPath);
+                    
+                    if (stats.isDirectory) {
+                        queue.push(fullPath);
+                    } else if (stats.isFile && isLoadableFile(item.name)) {
+                        files.push({ path: fullPath, file: null }); // file is null for Electron since we read directly from fs
+                    }
+                }
+            }
+            
+            return files;
+        }
+        
+        // Helper function to join paths (compatible with both Electron and browser)
+        const path = {
+            join: function(...parts) {
+                // For Electron, we use the real path module
+                if (isElectron && window.electronAPI.path) {
+                    return window.electronAPI.path.join(...parts);
+                } else {
+                    // Browser-compatible path joining
+                    // Remove leading slashes from all parts except the first
+                    const normalizedParts = parts.map((part, index) => {
+                        if (index === 0) {
+                            return part.replace(/\\/g, '/');
+                        } else {
+                            return part.replace(/^[/\\]+/, '').replace(/\\/g, '/');
+                        }
+                    });
+                    return normalizedParts.join('/').replace(/\/+/g, '/');
+                }
+            }
+        };
 
         function showLoadingOverlay(title, status) {
             DOM.loadingOverlay.classList.remove('hidden');
@@ -964,9 +1088,21 @@
                 await new Promise(r => setTimeout(r, 0));
                 
                 await Promise.all(chunk.map(async ({ path, file }) => {
-                    const content = await file.text();
-                    totalSize += file.size;
-                    state.files.set(path, { content, original: content, modified: false, size: file.size });
+                    let content, size;
+                    
+                    // If we're in Electron, read the file from the filesystem
+                    if (isElectron) {
+                        content = await window.electronAPI.readFile(path);
+                        // We'll get the size from the content length
+                        size = new Blob([content]).size;
+                    } else {
+                        // In browser environment, read from the File object
+                        content = await file.text();
+                        size = file.size;
+                    }
+                    
+                    totalSize += size;
+                    state.files.set(path, { content, original: content, modified: false, size: size });
                     
                     const ext = getFileExtension(path);
                     state.fileTypeStats[ext] = (state.fileTypeStats[ext] || 0) + 1;
@@ -1233,7 +1369,7 @@
             renderFileTree();
         }
 
-        function openFile(path) {
+        async function openFile(path) {
             const prev = DOM.fileTree.querySelector('.file-tree-item.active');
             if (prev) prev.classList.remove('active');
             
@@ -2611,13 +2747,32 @@
             showToast('Код отформатирован', 'success');
         }
         
-        function saveCurrentFile() { 
+        function saveCurrentFile() {
             if (state.currentFile) {
                 const f = state.files.get(state.currentFile);
                 f.original = f.content;
                 f.modified = false;
+                
+                // If we're in Electron, save the file to the filesystem
+                if (isElectron) {
+                    window.electronAPI.writeFile(state.currentFile, DOM.codeEditor.value)
+                        .then(success => {
+                            if (success) {
+                                showToast('Файл сохранён на диск', 'success');
+                            } else {
+                                showToast('Ошибка при сохранении файла', 'error');
+                            }
+                        })
+                        .catch(err => {
+                            console.error('Error saving file:', err);
+                            showToast('Ошибка при сохранении файла: ' + err.message, 'error');
+                        });
+                } else {
+                    // Fallback for web environment
+                    showToast('Сохранено в памяти', 'success');
+                }
+                
                 renderFileTree();
-                showToast('Сохранено', 'success');
             }
         }
         
