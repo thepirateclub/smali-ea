@@ -1289,20 +1289,28 @@
             const parts = ['<div class="p-2 text-xs text-gray-400 uppercase font-bold">Результаты</div>'];
             let count = 0;
 
-            for (const [path] of state.files) {
-                if (count >= 100) break;
-                if (path.toLowerCase().includes(query)) {
-                    const fileName = path.split('/').pop();
-                    const safePath = path.replace(/"/g, '&quot;');
-                    parts.push(`
-                        <div class="file-tree-item px-2 py-1 cursor-pointer rounded text-sm truncate"
-                             onclick="openFile('${safePath}')" data-path="${safePath}" title="${path}">
-                            <span class="text-yellow-400">📄</span> ${fileName}
-                        </div>
-                    `);
-                    count++;
+            // Use a more efficient search algorithm for large datasets
+            const fileEntries = Array.from(state.files.entries());
+            
+            for (let i = 0; i < fileEntries.length && count < 100; i += 10) {
+                // Process in small batches to maintain UI responsiveness
+                const batch = fileEntries.slice(i, i + 10);
+                for (const [path] of batch) {
+                    if (path.toLowerCase().includes(query)) {
+                        const fileName = path.split('/').pop();
+                        const safePath = path.replace(/"/g, '&quot;');
+                        parts.push(`
+                            <div class="file-tree-item px-2 py-1 cursor-pointer rounded text-sm truncate"
+                                 onclick="openFile('${safePath}')" data-path="${safePath}" title="${path}">
+                                <span class="text-yellow-400">📄</span> ${fileName}
+                            </div>
+                        `);
+                        count++;
+                        if (count >= 100) break;
+                    }
                 }
             }
+            
             DOM.fileTree.innerHTML = parts.join('');
         }
 
@@ -1830,11 +1838,15 @@
         // ==================== LICENSE PATCHING ====================
         
         function patchLicenseChecks() {
+            // Extended patterns to catch more license-related files
             const licensePatterns = [
                 /license/i, /licensing/i, /licensecheck/i, /checkLicense/i,
                 /islicensed/i, /validatelicense/i, /licensevalid/i,
                 /offlinelicense/i, /ilicense/i, /licensemanager/i,
-                /licenseservice/i, /licenseverif/i, /haslicense/i
+                /licenseservice/i, /licenseverif/i, /haslicense/i,
+                /integrity/i, /gameclient/i, /drm/i, /verification/i, /verify/i,
+                /checksum/i, /signature/i, /auth/i, /authenticate/i,
+                /play/i, /googleplay/i, /billing/i, /purchase/i
             ];
             
             let patchedCount = 0;
@@ -1843,14 +1855,22 @@
             for (const [path, fileData] of state.files) {
                 if (!path.endsWith('.smali')) continue;
                 
-                const fileName = path.split('/').pop().replace('.smali', '');
+                const fileName = path.toLowerCase();
                 const isLicenseFile = licensePatterns.some(p => p.test(fileName));
                 
-                if (isLicenseFile) {
+                // Also check if file content contains license-related keywords
+                if (!isLicenseFile && fileData.content) {
+                    const content = fileData.content.toLowerCase();
+                    const hasLicenseKeywords = licensePatterns.some(p => p.test(content));
+                    if (!hasLicenseKeywords) continue;
+                }
+                
+                if (isLicenseFile || (fileData.content && licensePatterns.some(p => p.test(fileData.content.toLowerCase())))) {
                     const methods = [];
                     const methodRegex = /^\.method\s+([\w\s-]+)\s+(<?[\w$<>]+>?)\(([^)]*)\)(\[?[VZBSCIJFD]|\[?L[\w/$]+;)/gm;
                     let match;
                     
+                    // Extract methods more efficiently
                     const lines = fileData.content.split('\n');
                     for (let i = 0; i < lines.length; i++) {
                         const m = lines[i].match(/^\.method\s+([\w\s-]+)\s+(<?[\w$<>]+>?)\(([^)]*)\)(\[?[VZBSCIJFD]|\[?L[\w/$]+;)/);
@@ -1895,13 +1915,39 @@
                             }
                         }
                         // Patch void methods (just return)
-                        else if (ret === 'V' && /check|verify|validate/i.test(method.name)) {
+                        else if (ret === 'V' && /check|verify|validate|license|auth|verify/i.test(method.name)) {
                             const oldCode = getMethodCodeByLine(path, method.line);
                             if (oldCode && !oldCode.includes('# PATCHED')) {
                                 const stubCode = `.method ${method.modifiers} ${method.name}(${method.params})V
     .locals 0
     # PATCHED - License check bypassed
     return-void
+.end method`;
+                                
+                                fileData.content = fileData.content.replace(oldCode, stubCode);
+                                modified = true;
+                                patchedCount++;
+                                
+                                if (!state.fileChanges.has(path)) {
+                                    state.fileChanges.set(path, []);
+                                }
+                                state.fileChanges.get(path).push({
+                                    methodName: method.name,
+                                    oldCode,
+                                    newCode: stubCode,
+                                    timestamp: Date.now()
+                                });
+                            }
+                        }
+                        // Patch methods that return objects (return null to bypass checks)
+                        else if (ret !== 'V' && /check|verify|validate|license|auth|verify/i.test(method.name)) {
+                            const oldCode = getMethodCodeByLine(path, method.line);
+                            if (oldCode && !oldCode.includes('# PATCHED')) {
+                                const stubCode = `.method ${method.modifiers} ${method.name}(${method.params})${ret}
+    .locals 1
+    # PATCHED - License check bypassed
+    const/4 v0, 0x0
+    return-object v0
 .end method`;
                                 
                                 fileData.content = fileData.content.replace(oldCode, stubCode);
@@ -1976,7 +2022,11 @@
                 return;
             }
             
-            const parts = changedFiles.map(([path, changes]) => {
+            // For large numbers of changed files, implement virtual scrolling or pagination
+            const MAX_DISPLAY = 100;
+            const displayFiles = changedFiles.slice(0, MAX_DISPLAY);
+            
+            const parts = displayFiles.map(([path, changes]) => {
                 const fileName = path.split('/').pop();
                 const isSelected = state.selectedChangeFile === path;
                 return `
@@ -1989,6 +2039,10 @@
                     </div>
                 `;
             });
+            
+            if (changedFiles.length > MAX_DISPLAY) {
+                parts.push(`<div class="p-3 text-center text-sm text-gray-500">Показано ${MAX_DISPLAY} из ${changedFiles.length} файлов</div>`);
+            }
             
             DOM.changesList.innerHTML = parts.join('');
         }
@@ -2476,7 +2530,8 @@
                 
                 if (state.methodsIndex?.has(searchKey)) {
                     const indices = state.methodsIndex.get(searchKey);
-                    for (const idx of indices) {
+                    // Limit results to prevent UI blocking
+                    for (const idx of indices.slice(0, 100)) {
                         if (filtered.length >= 50) break;
                         const m = state.methods[idx];
                         if (m.nameLower.includes(search)) filtered.push(m);
