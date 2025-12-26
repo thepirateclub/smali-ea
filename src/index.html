@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smali Editor & Analyzer</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <!-- Header -->
+    <header class="bg-gray-800 border-b border-gray-700 px-6 py-3">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold">Smali Editor & Analyzer</h1>
+                    <p class="text-xs text-gray-400">Редактор, анализатор зависимостей и модификатор методов</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <button onclick="patchLicenseChecks()" class="license-btn px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+                    🔓 Патч лицензии
+                </button>
+                <button onclick="exportProject()" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-medium transition flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                    </svg>
+                    Экспорт патча
+                </button>
+                <button onclick="showStats()" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition">
+                    📊 Статистика
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex h-[calc(100vh-100px)]">
+        <!-- Sidebar - File Tree (Resizable) -->
+        <aside id="sidebar" class="sidebar-resizable bg-gray-800 border-r border-gray-700 flex flex-col flex-shrink-0" style="width: 280px; min-width: 200px; max-width: 500px;">
+            <div class="p-4 border-b border-gray-700">
+                <h2 class="font-semibold text-sm text-gray-300 mb-3">📁 ФАЙЛЫ ПРОЕКТА</h2>
+                <div id="dropZone" class="drop-zone border-2 border-dashed border-gray-600 rounded-lg p-4 text-center cursor-pointer hover:border-blue-500 transition">
+                    <svg class="w-8 h-8 mx-auto text-gray-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                    </svg>
+                    <p class="text-xs text-gray-400">Перетащите папку проекта</p>
+                    <input type="file" id="fileInput" multiple webkitdirectory class="hidden">
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-2" id="fileTree">
+                <p class="text-gray-500 text-sm text-center py-8">Нет загруженных файлов</p>
+            </div>
+            <div class="p-3 border-t border-gray-700">
+                <input type="text" id="searchFiles" placeholder="🔍 Поиск файлов..." 
+                    class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm focus:outline-none focus:border-blue-500">
+            </div>
+            <div class="sidebar-resizer" id="sidebarResizer"></div>
+        </aside>
+
+        <!-- Main Content -->
+        <div class="flex-1 flex flex-col overflow-hidden">
+            <!-- Tabs -->
+            <div class="bg-gray-800 border-b border-gray-700 px-4 py-2 flex items-center gap-2 flex-shrink-0">
+                <button class="tab-btn active px-4 py-2 rounded-lg text-sm font-medium transition" data-tab="editor">
+                    ✏️ Редактор
+                </button>
+                <button class="tab-btn px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition" data-tab="dependencies">
+                    🔗 Зависимости
+                </button>
+                <button class="tab-btn px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition" data-tab="methods">
+                    🔧 Методы
+                </button>
+                <button class="tab-btn px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition" data-tab="changes">
+                    📝 Изменения <span id="changesCount" class="ml-1 px-1.5 py-0.5 bg-blue-600 rounded text-xs hidden">0</span>
+                </button>
+                <div class="ml-auto text-sm text-gray-400 truncate max-w-md" id="currentFile">Файл не выбран</div>
+            </div>
+
+            <!-- Tab Content -->
+            <div class="flex-1 overflow-hidden">
+                <!-- Editor Tab -->
+                <div id="editorTab" class="tab-content h-full flex">
+                    <!-- Code Editor -->
+                    <div class="flex-1 flex flex-col min-w-0">
+                        <div class="editor-container flex-1">
+                            <div id="lineNumbers" class="line-numbers code-font"></div>
+                            <div class="code-area" id="codeArea">
+                                <div class="code-wrapper" id="codeWrapper">
+                                    <pre id="codeHighlight" class="code-highlight code-font"></pre>
+                                    <textarea id="codeEditor" 
+                                        class="code-textarea code-font"
+                                        placeholder="Выберите файл для редактирования..."
+                                        spellcheck="false"></textarea>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-gray-800 border-t border-gray-700 px-4 py-2 flex items-center justify-between flex-shrink-0">
+                            <div class="flex items-center gap-4 text-xs text-gray-400">
+                                <span id="cursorPos">Строка: 1, Колонка: 1</span>
+                                <span id="fileSize">0 байт</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button onclick="formatCode()" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs transition">
+                                    📐 Форматировать
+                                </button>
+                                <button onclick="saveProject()" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs transition">
+                                    💾 Сохранить
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dependencies Tab -->
+                <div id="dependenciesTab" class="tab-content h-full hidden">
+                    <div class="flex h-full">
+                        <!-- Left Panel - File List -->
+                        <div class="w-80 bg-gray-800 border-r border-gray-700 flex flex-col">
+                            <div class="p-3 border-b border-gray-700">
+                                <h3 class="font-semibold text-sm">Файлы проекта</h3>
+                            </div>
+                            <div class="flex-1 overflow-y-auto p-2" id="dependenciesFileList">
+                                <p class="text-gray-500 text-sm text-center py-8">Нет зависимостей</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Main Graph Area -->
+                        <div class="flex-1 flex flex-col">
+                            <div class="p-3 border-b border-gray-700 flex items-center justify-between">
+                                <h3 class="font-semibold text-sm">Граф зависимостей</h3>
+                                <div class="flex gap-2">
+                                    <button onclick="zoomIn()" class="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs">+</button>
+                                    <button onclick="zoomOut()" class="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs">-</button>
+                                    <button onclick="resetView()" class="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs">↺ Сброс</button>
+                                    <button onclick="autoLayout()" class="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs">Авто</button>
+                                </div>
+                            </div>
+                            <div id="dependencyGraph" class="flex-1 relative">
+                                <!-- Graph will be rendered here by JavaScript -->
+                            </div>
+                        </div>
+                        
+                        <!-- Right Panel - Dependency Info -->
+                        <div class="w-80 bg-gray-800 border-l border-gray-700 flex flex-col">
+                            <div class="p-3 border-b border-gray-700">
+                                <h3 class="font-semibold text-sm">Информация</h3>
+                            </div>
+                            <div class="flex-1 overflow-y-auto p-3" id="dependencyInfo">
+                                <p class="text-gray-500 text-sm text-center py-8">Выберите элемент графа</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Methods Tab -->
+                <div id="methodsTab" class="tab-content h-full hidden">
+                    <div class="methods-grid h-full">
+                        <!-- Left Panel - File Structure -->
+                        <div class="method-panel-col">
+                            <div class="panel-header">
+                                <span>Структура класса</span>
+                            </div>
+                            <div class="panel-content" id="structurePanel">
+                                <p class="text-gray-500 text-sm text-center py-8">Выберите файл</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Middle Left - Methods List -->
+                        <div class="method-panel-col">
+                            <div class="panel-header">
+                                <span>Методы</span>
+                            </div>
+                            <div class="panel-content" id="methodsContainer">
+                                <p class="text-gray-500 text-sm text-center py-8">Нет методов</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Middle Right - Fields -->
+                        <div class="method-panel-col">
+                            <div class="panel-header">
+                                <span>Поля</span>
+                            </div>
+                            <div class="panel-content" id="fieldsContainer">
+                                <p class="text-gray-500 text-sm text-center py-8">Нет полей</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Right Panel - Class Info -->
+                        <div class="method-panel-col">
+                            <div class="panel-header">
+                                <span>Информация</span>
+                            </div>
+                            <div class="panel-content" id="classInfo">
+                                <p class="text-gray-500 text-sm text-center py-8">Информация о классе</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Changes Tab -->
+                <div id="changesTab" class="tab-content h-full hidden">
+                    <div class="flex h-full">
+                        <div class="w-80 bg-gray-800 border-r border-gray-700 flex flex-col">
+                            <div class="p-3 border-b border-gray-700">
+                                <h3 class="font-semibold text-sm">Изменения</h3>
+                            </div>
+                            <div class="flex-1 overflow-y-auto" id="changesList">
+                                <p class="text-gray-500 text-sm text-center py-8">Нет изменений</p>
+                            </div>
+                        </div>
+                        <div class="flex-1 bg-gray-850 p-4">
+                            <div id="changesPreview">
+                                <p class="text-gray-500 text-sm text-center py-8">Выберите изменение для просмотра</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="js/main.js" type="module"></script>
+</body>
+</html>
