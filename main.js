@@ -1,8 +1,82 @@
-const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fse = require('fs-extra');
 const chokidar = require('chokidar');
+
+// Create application menu
+function createApplicationMenu() {
+  const isMac = process.platform === 'darwin';
+
+  const template = [
+    // File menu
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'Open Folder',
+          accelerator: 'CmdOrCtrl+O',
+          click: async () => {
+            const result = await ipcMain.handle('show-open-dialog', null);
+            if (result && result.length > 0) {
+              // Send the selected folder path to the renderer process
+              BrowserWindow.getAllWindows().forEach(window => {
+                window.webContents.send('folder-selected', result);
+              });
+            }
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Open File',
+          click: async () => {
+            const result = await dialog.showOpenDialog({
+              properties: ['openFile'],
+              filters: [
+                { name: 'Smali Files', extensions: ['smali'] },
+                { name: 'All Files', extensions: ['*'] }
+              ]
+            });
+            if (!result.canceled) {
+              BrowserWindow.getAllWindows().forEach(window => {
+                window.webContents.send('file-selected', result.filePaths);
+              });
+            }
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Exit',
+          accelerator: 'CmdOrCtrl+Q',
+          click: () => {
+            app.quit();
+          }
+        }
+      ]
+    },
+    // Window menu
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        {
+          role: 'reload',
+          accelerator: 'CmdOrCtrl+R'
+        },
+        ...(isMac ? [
+          { type: 'separator' },
+          { role: 'front' },
+          { type: 'separator' },
+          { role: 'window' }
+        ] : [])
+      ]
+    }
+  ];
+
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}
 
 // Handle file system operations
 ipcMain.handle('read-file', async (event, filePath) => {
@@ -85,7 +159,7 @@ ipcMain.handle('scan-folder-async', async (event, folderPath, options = {}) => {
         console.warn(`Error accessing directory ${currentPath}:`, error.message);
       }
     }
-    
+
     // Yield to event loop periodically
     await new Promise(resolve => setImmediate(resolve));
   }
@@ -101,17 +175,17 @@ ipcMain.handle('scan-folder-async', async (event, folderPath, options = {}) => {
         for (const item of items) {
           const fullPath = path.join(currentPath, item.name);
           const stats = await fs.promises.stat(fullPath);
-          
+
           if (stats.isDirectory()) {
             queue.push(fullPath);
           } else if (stats.isFile() && allowedExtensions.some(ext => item.name.toLowerCase().endsWith(ext))) {
-            files.push({ 
-              path: fullPath, 
+            files.push({
+              path: fullPath,
               size: stats.size,
-              mtime: stats.mtime 
+              mtime: stats.mtime
             });
             processedCount++;
-            
+
             // Send progress update periodically
             if (onProgress && processedCount % 100 === 0) {
               const progress = Math.round((processedCount / totalFiles) * 100);
@@ -121,7 +195,7 @@ ipcMain.handle('scan-folder-async', async (event, folderPath, options = {}) => {
                 total: totalFiles,
                 currentFile: item.name
               });
-              
+
               // Yield to event loop to prevent blocking
               await new Promise(resolve => setImmediate(resolve));
             }
@@ -131,11 +205,11 @@ ipcMain.handle('scan-folder-async', async (event, folderPath, options = {}) => {
         console.warn(`Error accessing directory ${currentPath}:`, error.message);
       }
     }
-    
+
     // Yield to event loop periodically
     await new Promise(resolve => setImmediate(resolve));
   }
-  
+
   // Final progress update
   if (onProgress) {
     event.sender.send('scan-progress', {
@@ -183,7 +257,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js')
     },
     icon: path.join(__dirname, 'icon.png'), // Icon file if available
-    autoHideMenuBar: true, // Hide menu bar by default
+    autoHideMenuBar: false, // Show menu bar by default
     backgroundColor: '#111827' // Match the app's dark theme
   });
 
@@ -197,6 +271,7 @@ function createWindow() {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 app.whenReady().then(() => {
+  createApplicationMenu(); // Create the application menu
   createWindow();
 
   app.on('activate', function () {
