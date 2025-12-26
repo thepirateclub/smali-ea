@@ -2,6 +2,18 @@
 
 A powerful Smali editor and analyzer tool with dependency visualization and method modification capabilities.
 
+## Performance Improvements
+
+The application has been optimized following Electron performance best practices:
+
+- **Async File System Operations**: All file operations now use async/await to prevent blocking the main thread
+- **Efficient Folder Scanning**: Implemented chunked processing and yielding to event loop to maintain UI responsiveness during large folder scans
+- **File Watching Optimizations**: Added chokidar performance options and debounce mechanisms to prevent excessive file change events
+- **Syntax Highlighting**: Implemented adaptive highlighting - uses simplified approach for large files (>100KB) and detailed approach for smaller files
+- **Line Number Rendering**: Virtual scrolling for line numbers in large files (>5000 lines) to prevent DOM performance issues
+- **Memory Management**: Proper cleanup of event listeners and timers to prevent memory leaks
+- **Virtual Rendering**: For large dependency graphs and large numbers of lines, virtual rendering is used to maintain performance
+
 ## Features
 
 - **Smali Code Editor**: Syntax highlighting for Smali code with line numbers
