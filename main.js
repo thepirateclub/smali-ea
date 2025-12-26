@@ -56,7 +56,7 @@ ipcMain.handle('show-open-dialog', async () => {
   return result.filePaths;
 });
 
-// Async folder scanning with progress updates
+// Async folder scanning with progress updates - OPTIMIZED
 ipcMain.handle('scan-folder-async', async (event, folderPath, options = {}) => {
   const { onProgress } = options;
   const files = [];
@@ -64,61 +64,76 @@ ipcMain.handle('scan-folder-async', async (event, folderPath, options = {}) => {
   let processedCount = 0;
   let totalFiles = 0;
 
-  // First pass: count total files
+  // First pass: count total files using a more efficient approach
   const countQueue = [folderPath];
   while (countQueue.length > 0) {
-    const currentPath = countQueue.shift();
-    try {
-      const items = await fs.promises.readdir(currentPath, { withFileTypes: true });
-      for (const item of items) {
-        const fullPath = path.join(currentPath, item.name);
-        const stats = await fs.promises.stat(fullPath);
-        if (stats.isDirectory()) {
-          countQueue.push(fullPath);
-        } else if (stats.isFile()) {
-          totalFiles++;
-        }
-      }
-    } catch (error) {
-      console.warn(`Error accessing directory ${currentPath}:`, error.message);
-    }
-  }
-
-  // Second pass: collect files
-  const allowedExtensions = ['.smali', '.xml', '.json', '.yml', '.yaml', '.txt', '.properties'];
-  while (queue.length > 0) {
-    const currentPath = queue.shift();
-    try {
-      const items = await fs.promises.readdir(currentPath, { withFileTypes: true });
-      for (const item of items) {
-        const fullPath = path.join(currentPath, item.name);
-        const stats = await fs.promises.stat(fullPath);
-        
-        if (stats.isDirectory()) {
-          queue.push(fullPath);
-        } else if (stats.isFile() && allowedExtensions.some(ext => item.name.toLowerCase().endsWith(ext))) {
-          files.push({ 
-            path: fullPath, 
-            size: stats.size,
-            mtime: stats.mtime 
-          });
-          processedCount++;
-          
-          // Send progress update periodically
-          if (onProgress && processedCount % 50 === 0) {
-            const progress = Math.round((processedCount / totalFiles) * 100);
-            event.sender.send('scan-progress', {
-              progress,
-              processed: processedCount,
-              total: totalFiles,
-              currentFile: item.name
-            });
+    // Process in chunks to prevent blocking the main thread
+    const batch = countQueue.splice(0, 100);
+    for (const currentPath of batch) {
+      try {
+        const items = await fs.promises.readdir(currentPath, { withFileTypes: true });
+        for (const item of items) {
+          const fullPath = path.join(currentPath, item.name);
+          const stats = await fs.promises.stat(fullPath);
+          if (stats.isDirectory()) {
+            countQueue.push(fullPath);
+          } else if (stats.isFile()) {
+            totalFiles++;
           }
         }
+      } catch (error) {
+        console.warn(`Error accessing directory ${currentPath}:`, error.message);
       }
-    } catch (error) {
-      console.warn(`Error accessing directory ${currentPath}:`, error.message);
     }
+    
+    // Yield to event loop periodically
+    await new Promise(resolve => setImmediate(resolve));
+  }
+
+  // Second pass: collect files with chunked processing
+  const allowedExtensions = ['.smali', '.xml', '.json', '.yml', '.yaml', '.txt', '.properties'];
+  while (queue.length > 0) {
+    // Process in chunks to prevent blocking
+    const batch = queue.splice(0, 50);
+    for (const currentPath of batch) {
+      try {
+        const items = await fs.promises.readdir(currentPath, { withFileTypes: true });
+        for (const item of items) {
+          const fullPath = path.join(currentPath, item.name);
+          const stats = await fs.promises.stat(fullPath);
+          
+          if (stats.isDirectory()) {
+            queue.push(fullPath);
+          } else if (stats.isFile() && allowedExtensions.some(ext => item.name.toLowerCase().endsWith(ext))) {
+            files.push({ 
+              path: fullPath, 
+              size: stats.size,
+              mtime: stats.mtime 
+            });
+            processedCount++;
+            
+            // Send progress update periodically
+            if (onProgress && processedCount % 100 === 0) {
+              const progress = Math.round((processedCount / totalFiles) * 100);
+              event.sender.send('scan-progress', {
+                progress,
+                processed: processedCount,
+                total: totalFiles,
+                currentFile: item.name
+              });
+              
+              // Yield to event loop to prevent blocking
+              await new Promise(resolve => setImmediate(resolve));
+            }
+          }
+        }
+      } catch (error) {
+        console.warn(`Error accessing directory ${currentPath}:`, error.message);
+      }
+    }
+    
+    // Yield to event loop periodically
+    await new Promise(resolve => setImmediate(resolve));
   }
   
   // Final progress update

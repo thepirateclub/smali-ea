@@ -1,28 +1,3 @@
-```
-# Dependencies
-node_modules/
+(performance-optimizations.js, index.html, main.js are source files - no build artifacts, dependencies, or temp files present)
 
-# Logs and temp files
-*.log
-*.tmp
-*.swp
-
-# Environment
-.env
-.env.local
-*.env.*
-
-# Editors
-.vscode/
-.idea/
-
-# Build artifacts
-dist/
-build/
-*.js.map
-*.min.js
-
-# OS generated files
-.DS_Store
-Thumbs.db
-```
+(empty - output nothing)
