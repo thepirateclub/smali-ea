@@ -117,7 +117,9 @@ export class App {
 const app = new App();
 export { app };
 
-// Initialize the app when the DOM is loaded
-document.addEventListener('DOMContentLoaded', async () => {
-  await app.init();
-});
+// Initialize the app when the DOM is loaded (only in browser environments)
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', async () => {
+    await app.init();
+  });
+}
