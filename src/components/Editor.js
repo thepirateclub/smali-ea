@@ -98,11 +98,33 @@ export class Editor {
     const lines = codeEditor.value.split('\n');
     let lineNumbersHtml = '';
     
-    for (let i = 1; i <= lines.length; i++) {
-      lineNumbersHtml += `<div>${i}</div>`;
+    // For very large files, only render visible lines to improve performance
+    if (lines.length > 5000) { // 5000+ lines
+      // Use a virtual scrolling approach - only render lines that are visible
+      const lineHeight = 22; // Approximate line height in pixels
+      const containerHeight = lineNumbers.clientHeight || 600;
+      const visibleLines = Math.ceil(containerHeight / lineHeight) + 10; // Add buffer
+      
+      // Calculate which lines are visible based on scroll position
+      const scrollTop = codeEditor.scrollTop;
+      const startLine = Math.max(0, Math.floor(scrollTop / lineHeight) - 5); // Add buffer
+      const endLine = Math.min(lines.length, startLine + visibleLines);
+      
+      for (let i = startLine + 1; i <= endLine; i++) {
+        lineNumbersHtml += `<div style="height: ${lineHeight}px; line-height: ${lineHeight}px;">${i}</div>`;
+      }
+      
+      // Set height for the container to maintain scroll consistency
+      lineNumbers.style.height = `${lines.length * lineHeight}px`;
+      lineNumbers.innerHTML = `<div style="margin-top: ${startLine * lineHeight}px">${lineNumbersHtml}</div>`;
+    } else {
+      // For smaller files, render all line numbers as before
+      for (let i = 1; i <= lines.length; i++) {
+        lineNumbersHtml += `<div>${i}</div>`;
+      }
+      
+      lineNumbers.innerHTML = lineNumbersHtml;
     }
-    
-    lineNumbers.innerHTML = lineNumbersHtml;
   }
 
   highlightSyntax() {
@@ -112,11 +134,34 @@ export class Editor {
     if (!codeEditor || !codeHighlight) return;
     
     const code = codeEditor.value;
-    const highlighted = this.highlightSmaliSyntax(code);
-    codeHighlight.innerHTML = highlighted
-      .replace(/\n/g, '<br>')
-      .replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;')
-      .replace(/ /g, '&nbsp;');
+    
+    // For very large files, use a more efficient highlighting approach
+    if (code.length > 100000) { // 100KB+
+      // Use a simpler highlighting approach for large files to prevent blocking
+      const highlighted = code
+        .replace(/(#.*)/g, '<span class="smali-comment">$1</span>')  // Comments
+        .replace(/(\\.field|\\.method|\\.class|\\.super|\\.implements)/g, '<span class="smali-directive">$1</span>')  // Directives
+        .replace(/\\b(public|private|protected|static|final|synchronized|bridge|varargs|native|abstract|strictfp|synthetic|constructor|declared-synchronized)\\b/g, '<span class="smali-modifier">$1</span>')  // Modifiers
+        .replace(/\\b(L[a-zA-Z0-9/$_]+;)/g, '<span class="smali-type">$1</span>')  // Types
+        .replace(/(\"[^\"]*\")/g, '<span class="smali-string">$1</span>')  // Strings
+        .replace(/\\b(v\\d+|p\\d+)\\b/g, '<span class="smali-register">$1</span>')  // Registers
+        .replace(/\\b(\\d+)\\b/g, '<span class="smali-number">$1</span>')  // Numbers
+        .replace(/(:[a-zA-Z0-9_]+)/g, '<span class="smali-label">$1</span>')  // Labels
+        .replace(/\\b(invoke-\\w+|if-\\w+|goto|return|move|const|new-instance|check-cast|instance-of)\\b/g, '<span class="smali-instruction">$1</span>')  // Instructions
+        .replace(/\\b(invoke-\\w+)\\b/g, '<span class="smali-invoke">$1</span>');  // Invoke instructions
+      
+      codeHighlight.innerHTML = highlighted
+        .replace(/\n/g, '<br>')
+        .replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;')
+        .replace(/ /g, '&nbsp;');
+    } else {
+      // Use the original detailed highlighting for smaller files
+      const highlighted = this.highlightSmaliSyntax(code);
+      codeHighlight.innerHTML = highlighted
+        .replace(/\n/g, '<br>')
+        .replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;')
+        .replace(/ /g, '&nbsp;');
+    }
   }
 
   highlightSmaliSyntax(code) {
