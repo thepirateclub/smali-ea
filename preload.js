@@ -10,5 +10,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readDir: (dirPath) => ipcRenderer.invoke('read-dir', dirPath),
   statFile: (filePath) => ipcRenderer.invoke('stat-file', filePath),
   showOpenDialog: () => ipcRenderer.invoke('show-open-dialog'),
+  scanFolderAsync: (folderPath) => ipcRenderer.invoke('scan-folder-async', folderPath),
+  watchFolder: (folderPath) => ipcRenderer.invoke('watch-folder', folderPath),
   path: path,
+});
+
+// Listen for scan progress events
+ipcRenderer.on('scan-progress', (event, data) => {
+  window.dispatchEvent(new CustomEvent('scan-progress', { detail: data }));
+});
+
+// Listen for file change events
+ipcRenderer.on('file-changed', (event, data) => {
+  window.dispatchEvent(new CustomEvent('file-changed', { detail: data }));
 });
