@@ -1,58 +1,71 @@
 # Smali Editor & Analyzer
 
-Мощный инструмент для редактирования и анализа Smali-файлов с возможностью визуализации зависимостей и модификации методов.
+A powerful Smali editor and analyzer tool with dependency visualization and method modification capabilities.
 
-## Особенности
+## Features
 
-- Редактор Smali-файлов с подсветкой синтаксиса
-- Визуализация зависимостей между классами
-- Поиск и модификация методов
-- Патчинг лицензионных проверок
-- Экспорт изменений в виде патчей
-- Поддержка работы с локальными файлами через Electron
+- **Smali Code Editor**: Syntax highlighting for Smali code with line numbers
+- **Dependency Analysis**: Visualize dependencies between classes and methods
+- **Method Extraction**: Extract and analyze methods from Smali files
+- **File Management**: Drag-and-drop file loading with search functionality
+- **License Patching**: Automated patching of license checks in Smali files
+- **Change Tracking**: Track and review changes made to files
 
-## Установка и запуск
+## Architecture
 
-1. Установите Node.js и npm
-2. Установите зависимости:
+The application has been modularized into the following components:
+
+- `/src/index.html` - Main HTML structure
+- `/src/css/styles.css` - All CSS styles
+- `/src/js/main.js` - Main JavaScript application logic
+- `/src/components/` - Reusable UI components (future expansion)
+
+## Installation and Usage
+
+1. Install Node.js and npm
+2. Install dependencies:
    ```bash
    npm install
    ```
-3. Запустите приложение:
+3. Run the application:
+   ```bash
+   npm run dev
+   ```
+   or
    ```bash
    npm start
    ```
 
-## Использование
+## Usage
 
-1. Запустите приложение
-2. Нажмите на область "Перетащите папку проекта" или используйте диалог выбора папки в Electron
-3. Выберите папку с Smali-файлами
-4. Используйте различные вкладки для редактирования, анализа зависимостей и модификации методов
+1. Run the application
+2. Click on the "Drag and drop project folder" area or use the folder selection dialog in Electron
+3. Select a folder with Smali files
+4. Use different tabs for editing, dependency analysis, and method modification
 
-## Сборка для дистрибуции
+## Building for Distribution
 
-Для сборки приложения в исполняемый файл:
+To build the application to an executable:
 
 ```bash
 npm install -g electron-builder
-npm run build
+npm run dist
 ```
 
-## Совместимость
+## Compatibility
 
-- В браузере: частичная функциональность (только drag & drop файлов)
-- В Electron: полная функциональность (чтение/запись файлов на диск, выбор папок)
+- In browser: partial functionality (drag & drop files only)
+- In Electron: full functionality (read/write files to disk, folder selection)
 
-## Файлы проекта
+## Project Files
 
-Приложение поддерживает следующие типы файлов:
-- `.smali` - файлы Smali
-- `.xml` - XML-файлы
-- `.json` - JSON-файлы
-- `.yml`, `.yaml` - конфигурационные файлы
-- `.txt`, `.properties` - текстовые файлы
+The application supports the following file types:
+- `.smali` - Smali files
+- `.xml` - XML files
+- `.json` - JSON files
+- `.yml`, `.yaml` - configuration files
+- `.txt`, `.properties` - text files
 
-## Автор
+## Author
 
 Smali Editor Team

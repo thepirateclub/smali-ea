@@ -1,10 +1,11 @@
 {
   "name": "smali-editor-analyzer",
   "version": "1.0.0",
-  "main": "main.js",
+  "main": "src/js/main.js",
   "scripts": {
-    "start": "electron .",
-    "dev": "electron .",
+    "start": "npx http-server ./src",
+    "dev": "npx http-server ./src -o",
+    "electron": "electron .",
     "build": "electron-builder --dir",
     "dist": "electron-builder",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -35,7 +36,7 @@
       "output": "dist"
     },
     "files": [
-      "index.html",
+      "src/**/*",
       "main.js",
       "preload.js",
       "icon.png",
