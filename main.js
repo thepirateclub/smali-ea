@@ -60,7 +60,7 @@ function createApplicationMenu() {
       submenu: [
         { role: 'minimize' },
         {
-          role: 'reload',
+          role: 'forceReload',
           accelerator: 'CmdOrCtrl+R'
         },
         ...(isMac ? [
@@ -69,6 +69,32 @@ function createApplicationMenu() {
           { type: 'separator' },
           { role: 'window' }
         ] : [])
+      ]
+    },
+    // Help menu
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Github',
+          click: () => {
+            require('electron').shell.openExternal('https://github.com/thepirateclub/smali-ea');
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'About',
+          click: async () => {
+            const aboutInfo = `Smali Editor & Analyzer\n\nA powerful Smali editor and analyzer tool with dependency visualization and method modification capabilities.`;
+            dialog.showMessageBox({
+              type: 'info',
+              title: 'About Smali Editor & Analyzer',
+              message: 'Smali Editor & Analyzer',
+              detail: aboutInfo,
+              buttons: ['OK']
+            });
+          }
+        }
       ]
     }
   ];
