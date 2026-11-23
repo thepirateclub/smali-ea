@@ -33,7 +33,7 @@
       "output": "dist"
     },
     "files": [
-      "src/**/*",
+      "index.html",
       "main.js",
       "preload.js",
       "icon.png",

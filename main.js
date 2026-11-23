@@ -1,8 +1,41 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const fse = require('fs-extra');
 const chokidar = require('chokidar');
+
+let mainWindow = null;
+let folderWatcher = null;
+
+// Show the "open folder" dialog and notify the renderer with the selection.
+// Used by both the File > Open Folder menu item and the CmdOrCtrl+O accelerator.
+async function openFolderDialog() {
+  if (!mainWindow) return;
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Open Folder',
+    properties: ['openDirectory', 'multiSelections']
+  });
+  if (!result.canceled && result.filePaths.length > 0) {
+    win.webContents.send('folder-selected', result.filePaths);
+  }
+}
+
+// Show the "open file" dialog and notify the renderer with the selection.
+async function openFileSingleDialog() {
+  if (!mainWindow) return;
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Open File',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Smali Files', extensions: ['smali'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  });
+  if (!result.canceled && result.filePaths.length > 0) {
+    win.webContents.send('file-selected', result.filePaths);
+  }
+}
 
 // Create application menu
 function createApplicationMenu() {
@@ -16,33 +49,12 @@ function createApplicationMenu() {
         {
           label: 'Open Folder',
           accelerator: 'CmdOrCtrl+O',
-          click: async () => {
-            const result = await ipcMain.handle('show-open-dialog', null);
-            if (result && result.length > 0) {
-              // Send the selected folder path to the renderer process
-              BrowserWindow.getAllWindows().forEach(window => {
-                window.webContents.send('folder-selected', result);
-              });
-            }
-          }
+          click: openFolderDialog
         },
         { type: 'separator' },
         {
           label: 'Open File',
-          click: async () => {
-            const result = await dialog.showOpenDialog({
-              properties: ['openFile'],
-              filters: [
-                { name: 'Smali Files', extensions: ['smali'] },
-                { name: 'All Files', extensions: ['*'] }
-              ]
-            });
-            if (!result.canceled) {
-              BrowserWindow.getAllWindows().forEach(window => {
-                window.webContents.send('file-selected', result.filePaths);
-              });
-            }
-          }
+          click: openFileSingleDialog
         },
         { type: 'separator' },
         {
@@ -150,9 +162,11 @@ ipcMain.handle('stat-file', async (event, filePath) => {
 });
 
 ipcMain.handle('show-open-dialog', async () => {
-  const result = await dialog.showOpenDialog({
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  const result = await dialog.showOpenDialog(win, {
     properties: ['openDirectory', 'multiSelections']
   });
+  if (result.canceled) return [];
   return result.filePaths;
 });
 
@@ -251,20 +265,26 @@ ipcMain.handle('scan-folder-async', async (event, folderPath, options = {}) => {
 
 // Watch file changes
 ipcMain.handle('watch-folder', async (event, folderPath) => {
-  const watcher = chokidar.watch(folderPath, {
+  // Close any previous watcher to avoid leaking watchers on repeated calls
+  if (folderWatcher) {
+    await folderWatcher.close();
+    folderWatcher = null;
+  }
+
+  folderWatcher = chokidar.watch(folderPath, {
     ignored: /(^|[\/\\])\../, // ignore dotfiles
     persistent: true
   });
 
-  watcher.on('change', (filePath) => {
+  folderWatcher.on('change', (filePath) => {
     event.sender.send('file-changed', { type: 'change', filePath });
   });
 
-  watcher.on('add', (filePath) => {
+  folderWatcher.on('add', (filePath) => {
     event.sender.send('file-changed', { type: 'add', filePath });
   });
 
-  watcher.on('unlink', (filePath) => {
+  folderWatcher.on('unlink', (filePath) => {
     event.sender.send('file-changed', { type: 'unlink', filePath });
   });
 
@@ -285,6 +305,11 @@ function createWindow() {
     icon: path.join(__dirname, 'icon.png'), // Icon file if available
     autoHideMenuBar: false, // Show menu bar by default
     backgroundColor: '#111827' // Match the app's dark theme
+  });
+
+  mainWindow = win;
+  win.on('closed', () => {
+    mainWindow = null;
   });
 
   // Load the index.html file
