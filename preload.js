@@ -12,6 +12,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showOpenDialog: () => ipcRenderer.invoke('show-open-dialog'),
   scanFolderAsync: (folderPath) => ipcRenderer.invoke('scan-folder-async', folderPath),
   watchFolder: (folderPath) => ipcRenderer.invoke('watch-folder', folderPath),
+  on: (channel, callback) => {
+    const allowedChannels = ['folder-selected', 'file-selected', 'scan-progress', 'file-changed'];
+    if (!allowedChannels.includes(channel)) return;
+    ipcRenderer.on(channel, (event, ...args) => callback(...args));
+  },
   path: path,
 });
 
@@ -23,4 +28,13 @@ ipcRenderer.on('scan-progress', (event, data) => {
 // Listen for file change events
 ipcRenderer.on('file-changed', (event, data) => {
   window.dispatchEvent(new CustomEvent('file-changed', { detail: data }));
+});
+
+// Forward folder/file selections coming from the application menu
+ipcRenderer.on('folder-selected', (event, data) => {
+  window.dispatchEvent(new CustomEvent('folder-selected', { detail: data }));
+});
+
+ipcRenderer.on('file-selected', (event, data) => {
+  window.dispatchEvent(new CustomEvent('file-selected', { detail: data }));
 });
